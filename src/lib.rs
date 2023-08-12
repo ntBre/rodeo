@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
+use bond::{Bond, BondType};
 use graph::Graph;
 
+pub mod bond;
 mod graph;
 
 #[derive(Default)]
@@ -59,76 +61,9 @@ impl Atom {
     pub fn set_chiral_tag(&mut self, chiral_tag: Chi) {
         self.chiral_tag = chiral_tag;
     }
-}
 
-#[derive(Debug, PartialEq)]
-pub enum BondStereo {
-    E,
-    Z,
-    None,
-}
-
-#[derive(Default)]
-pub enum BondType {
-    Single,
-    Aromatic,
-    Double,
-    Triple,
-    Quadruple,
-    Quintuple,
-    Hextuple,
-    OneAndAHalf,
-    #[default]
-    Unspecified,
-}
-
-#[derive(Default)]
-pub struct Bond {
-    bond_type: BondType,
-
-    /// index in the owning molecule's bonds vector
-    index: usize,
-
-    /// first atom index in the owning molecule's atoms vector
-    begin_atom_index: usize,
-
-    /// second atom index in the owning molecule's atoms vector
-    end_atom_index: usize,
-
-    is_aromatic: bool,
-}
-
-impl Bond {
-    pub fn get_index(&self) -> usize {
-        todo!();
-    }
-
-    pub fn get_stereo(&self) -> BondStereo {
-        todo!();
-    }
-
-    pub fn set_stereo(&mut self, _stereo: BondStereo) {
-        todo!();
-    }
-
-    pub fn set_index(&mut self, index: usize) {
-        self.index = index;
-    }
-
-    pub fn set_begin_atom_index(&mut self, begin_atom_index: usize) {
-        self.begin_atom_index = begin_atom_index;
-    }
-
-    pub fn set_end_atom_index(&mut self, end_atom_index: usize) {
-        self.end_atom_index = end_atom_index;
-    }
-
-    pub fn set_is_aromatic(&mut self, is_aromatic: bool) {
-        self.is_aromatic = is_aromatic;
-    }
-
-    pub fn set_bond_type(&mut self, bond_type: BondType) {
-        self.bond_type = bond_type;
+    fn calc_explicit_valence(&self, _arg: bool) -> usize {
+        todo!()
     }
 }
 
