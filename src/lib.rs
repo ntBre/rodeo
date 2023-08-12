@@ -2,9 +2,11 @@ use std::collections::HashMap;
 
 use bond::{Bond, BondType};
 use graph::Graph;
+use ptable::{DEFAULT_VALENCE, IS_EARLY_ATOM};
 
 pub mod bond;
 mod graph;
+mod ptable;
 
 #[derive(Default)]
 pub enum Chi {
@@ -22,6 +24,8 @@ pub struct Atom {
     is_aromatic: bool,
     index: usize,
     chiral_tag: Chi,
+    explicit_valence: isize,
+    num_explicit_hs: usize,
 }
 
 impl Atom {
@@ -62,10 +66,6 @@ impl Atom {
 
     pub fn set_chiral_tag(&mut self, chiral_tag: Chi) {
         self.chiral_tag = chiral_tag;
-    }
-
-    fn calc_explicit_valence(&self, _arg: bool) -> usize {
-        todo!()
     }
 }
 
@@ -315,8 +315,13 @@ impl RWMol {
         }
     }
 
-    fn update_property_cache(&self, _arg: bool) {
-        todo!()
+    fn update_property_cache(&mut self, strict: bool) {
+        for atom_idx in 0..self.d_graph.vertices.len() {
+            // in-line atom.updatePropertyCache
+            self.calc_explicit_valence(atom_idx, strict);
+            self.calc_implicit_valence(atom_idx, strict);
+        }
+        // in-line bond.updatePropertyCache, which does nothing
     }
 
     fn symmetrize_sssr(&self) {
@@ -352,7 +357,7 @@ impl RWMol {
     }
 
     #[inline]
-    fn _atoms(&self) -> &Vec<Atom> {
+    fn atoms(&self) -> &Vec<Atom> {
         &self.d_graph.vertices
     }
 
@@ -390,7 +395,8 @@ impl RWMol {
         // NOTE that we are calling calcExplicitValence() here, we do this
         // because we cannot be sure that it has already been called on the atom
         // (cleanUp() gets called pretty early in the sanitization process):
-        if atom.calc_explicit_valence(false) == 5 {
+        let valence = self.calc_explicit_valence(atom_idx, false);
+        if valence == 5 {
             let aid = atom.get_index();
             for nbr_idx in self.atom_neighbors(atom_idx) {
                 let mut is_break = false;
@@ -440,8 +446,8 @@ impl RWMol {
         }
         // force a recalculation of the explicit valence here
         atom.set_is_aromatic(arom_holder);
-        atom.calc_explicit_valence(false);
         std::mem::swap(&mut self.atoms_mut()[atom_idx], &mut atom);
+        self.calc_explicit_valence(atom_idx, false);
     }
 
     fn phosphorus_cleanup(&mut self, _atom_idx: usize) {
@@ -456,4 +462,104 @@ impl RWMol {
     fn atom_neighbors(&self, _atom_idx: usize) -> Vec<usize> {
         todo!();
     }
+
+    /// in rdkit this is a method on `Atom`, but it requires an owning Molecule,
+    /// which is a reference nightmare in Rust.
+    fn calc_explicit_valence(
+        &mut self,
+        atom_idx: usize,
+        strict: bool,
+    ) -> isize {
+        let mut acc = 0.0;
+        for bond in self.get_bonds() {
+            acc += bond.get_valence_contrib(atom_idx);
+        }
+        acc += self.get_num_explicit_hs(atom_idx);
+        // check if acc is greater than the default valence
+        let atomic_number = self.atoms()[atom_idx].atomic_number;
+        let dv = DEFAULT_VALENCE[atomic_number] as f64;
+
+        let mut chr = self.atoms()[atom_idx].formal_charge as f64;
+        if IS_EARLY_ATOM[atomic_number] {
+            chr *= -1.0; // the usual correction for early atoms
+        }
+
+        // special case for carbon - see github #539
+        if atomic_number == 6 && chr > 0.0 {
+            chr = -chr; // no multiply this time? lol
+        }
+
+        if acc > (dv + chr) && self.atoms()[atom_idx].is_aromatic {
+            // this needs some explanation : if the atom is aromatic and accum >
+            // (dv + chr) we assume that no hydrogen can be added to this atom.
+            // We set x = (v + chr) such that x is the closest possible integer
+            // to "accum" but less than "accum".
+            //
+            // "v" here is one of the allowed valences. For example:
+            //    sulfur here : O=c1ccs(=O)cc1
+            //    nitrogen here : c1cccn1C
+            let mut pval = dv + chr;
+            let valens = get_valence_list(atomic_number);
+            for val in valens {
+                if val == -1 {
+                    break;
+                }
+                let mut val = val as f64;
+                val += chr;
+                if val > acc {
+                    break;
+                } else {
+                    pval = val;
+                }
+            }
+            // if we're within 1.5 of the allowed valence, go ahead and take it.
+            // this reflects things like the N in c1cccn1C, which starts with
+            // accum of 4, but which can be kekulized to C1=CC=CN1C, where the
+            // valence is 3 or the bridging N in c1ccn2cncc2c1, which starts
+            // with a valence of 4.5, but can be happily kekulized down to a
+            // valence of 3
+            if (acc - pval) as f64 <= 1.5 {
+                acc = pval;
+            }
+        }
+        // despite promising to not to blame it on him - this a trick Greg came
+        // up with: if we have a bond order sum of x.5 (i.e. 1.5, 2.5 etc) we
+        // would like it to round to the higher integer value -- 2.5 to 3
+        // instead of 2 -- so we will add 0.1 to accum. this plays a role in the
+        // number of hydrogen that are implicitly added. This will only happen
+        // when the accum is a non-integer value and less than the default
+        // valence (otherwise the above if statement should have caught it). An
+        // example of where this can happen is the following smiles:
+        //
+        //    C1ccccC1
+        //
+        // Daylight accepts this smiles and we should be able to Kekulize
+        // correctly.
+        acc += 0.1;
+
+        let res = acc.round() as isize;
+
+        if strict {
+            todo!();
+        }
+
+        self.atoms_mut()[atom_idx].explicit_valence = res;
+        res
+    }
+
+    fn calc_implicit_valence(
+        &mut self,
+        _atom_idx: usize,
+        _strict: bool,
+    ) -> isize {
+        todo!()
+    }
+
+    fn get_num_explicit_hs(&self, atom_idx: usize) -> f64 {
+        self.atoms()[atom_idx].num_explicit_hs as f64
+    }
+}
+
+fn get_valence_list(_atomic_number: usize) -> Vec<isize> {
+    todo!()
 }
