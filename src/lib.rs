@@ -352,7 +352,7 @@ impl RWMol {
     }
 
     #[inline]
-    fn atoms(&self) -> &Vec<Atom> {
+    fn _atoms(&self) -> &Vec<Atom> {
         &self.d_graph.vertices
     }
 
