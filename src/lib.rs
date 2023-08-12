@@ -85,17 +85,20 @@ pub enum BondType {
 #[derive(Default)]
 pub struct Bond {
     bond_type: BondType,
+
+    /// index in the owning molecule's bonds vector
+    index: usize,
+
+    /// first atom index in the owning molecule's atoms vector
+    begin_atom_index: usize,
+
+    /// second atom index in the owning molecule's atoms vector
+    end_atom_index: usize,
+
+    is_aromatic: bool,
 }
 
 impl Bond {
-    pub fn set_is_aromatic(&mut self, _aromatic: bool) {
-        todo!();
-    }
-
-    pub fn set_bond_type(&mut self, _typ: BondType) {
-        todo!();
-    }
-
     pub fn get_index(&self) -> usize {
         todo!();
     }
@@ -106,6 +109,26 @@ impl Bond {
 
     pub fn set_stereo(&mut self, _stereo: BondStereo) {
         todo!();
+    }
+
+    pub fn set_index(&mut self, index: usize) {
+        self.index = index;
+    }
+
+    pub fn set_begin_atom_index(&mut self, begin_atom_index: usize) {
+        self.begin_atom_index = begin_atom_index;
+    }
+
+    pub fn set_end_atom_index(&mut self, end_atom_index: usize) {
+        self.end_atom_index = end_atom_index;
+    }
+
+    pub fn set_is_aromatic(&mut self, is_aromatic: bool) {
+        self.is_aromatic = is_aromatic;
+    }
+
+    pub fn set_bond_type(&mut self, bond_type: BondType) {
+        self.bond_type = bond_type;
     }
 }
 
@@ -122,7 +145,7 @@ bitflags::bitflags! {
         const SetConjugation = 0x40;
         const SetHybridization = 0x80;
         const CleanupChirality = 0x100;
-        const AdjustHS = 0x200;
+        const AdjustHs = 0x200;
         const CleanupOrganometallics = 0x400;
         const All = 0b11111111111; // TODO not sure about this
     }
@@ -130,9 +153,11 @@ bitflags::bitflags! {
 
 pub enum AromaticityModel {
     MDL,
+    Default,
 }
 
 #[derive(Default)]
+#[allow(unused)]
 struct Point3D {
     x: f64,
     y: f64,
@@ -164,9 +189,11 @@ impl Conformer {
 #[derive(Default)]
 pub struct RWMol {
     name: String,
-    atoms: Vec<Atom>,
-    bonds: Vec<Bond>,
-    d_graph: Graph<Atom>,
+
+    /// isn't this just the length of bonds?
+    num_bonds: usize,
+
+    d_graph: Graph<Atom, Bond>,
 
     /// some collection of conformers. looks like this is supposed to be some
     /// kind of dictionary? called `d_conf` in C++
@@ -177,8 +204,6 @@ impl RWMol {
     pub fn new() -> Self {
         Self {
             name: String::new(),
-            atoms: Vec::new(),
-            bonds: Vec::new(),
             d_graph: Graph::default(),
             ..Self::default()
         }
@@ -191,18 +216,23 @@ impl RWMol {
 
     pub fn add_atom(&mut self, mut atom: Atom) -> usize {
         let which = self.d_graph.add_vertex();
-        atom.set_index(which);
+        atom.set_index(which.0);
         self.d_graph[which] = atom;
         for cfi in self.conformers_mut() {
-            cfi.set_atom_pos(which, Point3D::new(0.0, 0.0, 0.0));
+            cfi.set_atom_pos(which.0, Point3D::new(0.0, 0.0, 0.0));
         }
-        which
+        which.0
     }
 
     pub fn add_bond(&mut self, atom1: usize, atom2: usize) {
         assert!(atom1 != atom2, "attempted to add self-bond");
-        let b = Bond::default();
-        let which = self.d_graph.add_edge(atom1, atom2);
+        let which = self.d_graph.add_edge();
+        let mut b = Bond::default();
+        self.num_bonds += 1;
+        b.set_index(self.num_bonds - 1);
+        b.set_begin_atom_index(atom1);
+        b.set_end_atom_index(atom2);
+        self.d_graph[which] = b;
     }
 
     pub fn set_aromaticity(&self, _model: AromaticityModel) {
@@ -211,14 +241,87 @@ impl RWMol {
 
     pub fn get_bond_between_atoms_mut(
         &mut self,
-        _atom1: usize,
-        _atom2: usize,
-    ) -> &mut Bond {
-        todo!()
+        atom1: usize,
+        atom2: usize,
+    ) -> Option<&mut Bond> {
+        self.d_graph.edges.iter_mut().find(|b| {
+            (b.begin_atom_index, b.end_atom_index) == (atom1, atom2)
+                || (b.end_atom_index, b.begin_atom_index) == (atom1, atom2)
+        })
     }
 
-    pub fn sanitize(&mut self, _options: SanitizeOptions) {
-        todo!();
+    pub fn sanitize(&mut self, options: SanitizeOptions) {
+        use SanitizeOptions as SO;
+
+        // clear out any cached properties
+        self.clear_computed_props();
+
+        // clean up things like nitro groups
+        if options.contains(SO::Cleanup) {
+            self.cleanup();
+        }
+
+        // update computed properties on atoms and bonds
+        if options.contains(SO::Properties) {
+            self.update_property_cache(true);
+        } else {
+            self.update_property_cache(false);
+        }
+
+        if options.contains(SO::SymmRings) {
+            self.symmetrize_sssr();
+        }
+
+        // kekulizations
+        if options.contains(SO::Kekulize) {
+            self.kekulize();
+        }
+
+        // look for radicals:
+        //
+        // We do this now because we need to know that the N in [N]1C=CC=C1 has
+        // a radical before we move into set_aromaticity. It's important that
+        // this happen post-Kekulization because there's no way of telling what
+        // to do with the same molecule if it's in the form [n]1cccc1
+        if options.contains(SO::FindRadicals) {
+            self.assign_radicals();
+        }
+
+        // then do aromaticity perception
+        if options.contains(SO::SetAromaticity) {
+            self.set_aromaticity(AromaticityModel::Default);
+        }
+
+        // set conjugation
+        if options.contains(SO::SetConjugation) {
+            self.set_conjugation()
+        }
+
+        // set hybridization
+        if options.contains(SO::SetHybridization) {
+            self.set_hybridization();
+        }
+
+        // remove bogus chirality specs
+        if options.contains(SO::CleanupChirality) {
+            self.cleanup_chirality();
+        }
+
+        // adjust hydrogen counts
+        if options.contains(SO::AdjustHs) {
+            self.adjust_hs();
+        }
+
+        // fix things like non-metal to metal bonds that should be dative.
+        if options.contains(SO::CleanupOrganometallics) {
+            self.cleanup_organometallics();
+        }
+
+        // now that everything has been cleaned up, go through and check/update
+        // the computed valences on atoms and bonds one more time
+        if options.contains(SO::Properties) {
+            self.update_property_cache(true);
+        }
     }
 
     pub fn add_conformer(&mut self, _coordinates: &[f64]) {
@@ -230,15 +333,15 @@ impl RWMol {
     }
 
     pub fn get_atoms(&mut self) -> impl Iterator<Item = &Atom> {
-        self.atoms.iter()
+        self.d_graph.vertices.iter()
     }
 
     pub fn get_bonds(&self) -> impl Iterator<Item = &Bond> {
-        self.bonds.iter()
+        self.d_graph.edges.iter()
     }
 
     pub fn get_bonds_mut(&mut self) -> impl Iterator<Item = &mut Bond> {
-        self.bonds.iter_mut()
+        self.d_graph.edges.iter_mut()
     }
 
     pub fn find_symmetry_classes(&self) -> HashMap<usize, String> {
@@ -247,5 +350,49 @@ impl RWMol {
 
     fn conformers_mut(&mut self) -> impl Iterator<Item = &mut Conformer> {
         self.conformers.iter_mut()
+    }
+
+    fn clear_computed_props(&self) {
+        todo!()
+    }
+
+    fn cleanup(&self) {
+        todo!()
+    }
+
+    fn update_property_cache(&self, _arg: bool) {
+        todo!()
+    }
+
+    fn symmetrize_sssr(&self) {
+        todo!()
+    }
+
+    fn kekulize(&self) {
+        todo!()
+    }
+
+    fn assign_radicals(&self) {
+        todo!()
+    }
+
+    fn set_conjugation(&self) {
+        todo!()
+    }
+
+    fn set_hybridization(&self) {
+        todo!()
+    }
+
+    fn cleanup_chirality(&self) {
+        todo!()
+    }
+
+    fn adjust_hs(&self) {
+        todo!()
+    }
+
+    fn cleanup_organometallics(&self) {
+        todo!()
     }
 }
