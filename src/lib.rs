@@ -16,6 +16,7 @@ pub enum Chi {
 
 #[derive(Default)]
 pub struct Atom {
+    atomic_number: usize,
     name: String,
     formal_charge: isize,
     is_aromatic: bool,
@@ -24,8 +25,9 @@ pub struct Atom {
 }
 
 impl Atom {
-    pub fn new(_num: usize) -> Self {
+    pub fn new(atomic_number: usize) -> Self {
         Self {
+            atomic_number,
             name: String::new(),
             formal_charge: 0,
             is_aromatic: false,
@@ -174,6 +176,17 @@ impl RWMol {
         todo!()
     }
 
+    fn get_bond_between_atoms(
+        &self,
+        atom1: usize,
+        atom2: usize,
+    ) -> Option<&Bond> {
+        self.d_graph.edges.iter().find(|b| {
+            (b.begin_atom_index, b.end_atom_index) == (atom1, atom2)
+                || (b.end_atom_index, b.begin_atom_index) == (atom1, atom2)
+        })
+    }
+
     pub fn get_bond_between_atoms_mut(
         &mut self,
         atom1: usize,
@@ -267,7 +280,7 @@ impl RWMol {
         todo!();
     }
 
-    pub fn get_atoms(&mut self) -> impl Iterator<Item = &Atom> {
+    pub fn get_atoms(&self) -> impl Iterator<Item = &Atom> {
         self.d_graph.vertices.iter()
     }
 
@@ -287,12 +300,19 @@ impl RWMol {
         self.conformers.iter_mut()
     }
 
-    fn clear_computed_props(&self) {
-        todo!()
+    fn clear_computed_props(&mut self) {
+        // no op for now, not sure which props are computed
     }
 
-    fn cleanup(&self) {
-        todo!()
+    fn cleanup(&mut self) {
+        for atom_idx in 0..self.d_graph.vertices.len() {
+            match self.d_graph.vertices[atom_idx].atomic_number {
+                7 => self.nitrogen_cleanup(atom_idx),
+                15 => self.phosphorus_cleanup(atom_idx),
+                17 | 35 | 53 => self.halogen_cleanup(atom_idx),
+                _ => {}
+            }
+        }
     }
 
     fn update_property_cache(&self, _arg: bool) {
@@ -329,5 +349,111 @@ impl RWMol {
 
     fn cleanup_organometallics(&self) {
         todo!()
+    }
+
+    #[inline]
+    fn atoms(&self) -> &Vec<Atom> {
+        &self.d_graph.vertices
+    }
+
+    #[inline]
+    fn atoms_mut(&mut self) -> &mut Vec<Atom> {
+        &mut self.d_graph.vertices
+    }
+
+    /// conversions here:
+    /// - neutral 5 coordinate N's with double bonds to O's to the zwitterionic
+    /// form. eg: CN(=O)=O -> C[N+](=O)[O-]
+    /// and:
+    /// C1=CC=CN(=O)=C1 -> C1=CC=C[N+]([O-])=C1
+    /// - neutral 5 coordinate N's with triple bonds to N's to the zwitterionic
+    /// form. eg: C-N=N#N -> C-N=[N+]=[N-]
+    fn nitrogen_cleanup(&mut self, atom_idx: usize) {
+        // NOTE we have to take this out to get around calling other borrowing
+        // methods in the loop. DO NOT forget to put it back at the end of the
+        // method
+        let mut atom = std::mem::take(&mut self.atoms_mut()[atom_idx]);
+
+        // we only want to do neutrals so that things like this don't get
+        // munged:
+        //  O=[n+]1occcc1
+        // this was sf.net issue 1811276
+        if atom.formal_charge != 0 {
+            return;
+        }
+
+        // we need to play this little aromaticity game because the explicit
+        // valence code modifies its results for aromatic atoms
+        let arom_holder = atom.is_aromatic;
+        atom.is_aromatic = false;
+
+        // NOTE that we are calling calcExplicitValence() here, we do this
+        // because we cannot be sure that it has already been called on the atom
+        // (cleanUp() gets called pretty early in the sanitization process):
+        if atom.calc_explicit_valence(false) == 5 {
+            let aid = atom.get_index();
+            for nbr_idx in self.atom_neighbors(atom_idx) {
+                let mut is_break = false;
+                // NOTE as with atom, we are taking this out of self.atoms to
+                // mess with it in the loop. Don't forget to put it back at the
+                // bottom of the loop. This is why we also can't use break
+                // directly and have to set is_break instead
+                let mut nbr = std::mem::take(&mut self.atoms_mut()[nbr_idx]);
+                if nbr.atomic_number == 8
+                    && nbr.formal_charge == 0
+                    && (self
+                        .get_bond_between_atoms(aid, nbr.index)
+                        .unwrap()
+                        .bond_type
+                        .is_double())
+                {
+                    // here's the double-bonded oxygen
+                    let b = self
+                        .get_bond_between_atoms_mut(aid, nbr.index)
+                        .unwrap();
+                    b.set_bond_type(BondType::Single);
+                    atom.set_formal_charge(1);
+                    nbr.set_formal_charge(-1);
+                    is_break = true;
+                } else if nbr.atomic_number == 7
+                    && nbr.formal_charge == 0
+                    && self
+                        .get_bond_between_atoms(aid, nbr.index)
+                        .unwrap()
+                        .bond_type
+                        .is_triple()
+                {
+                    // here's the triple-bonded nitrogens
+                    let b = self
+                        .get_bond_between_atoms_mut(aid, nbr.index)
+                        .unwrap();
+                    b.set_bond_type(BondType::Double);
+                    atom.set_formal_charge(1);
+                    nbr.set_formal_charge(-1);
+                    is_break = true;
+                }
+                std::mem::swap(&mut self.atoms_mut()[nbr_idx], &mut nbr);
+                if is_break {
+                    break;
+                }
+            }
+        }
+        // force a recalculation of the explicit valence here
+        atom.set_is_aromatic(arom_holder);
+        atom.calc_explicit_valence(false);
+        std::mem::swap(&mut self.atoms_mut()[atom_idx], &mut atom);
+    }
+
+    fn phosphorus_cleanup(&mut self, _atom_idx: usize) {
+        todo!()
+    }
+
+    fn halogen_cleanup(&mut self, _atom_idx: usize) {
+        todo!()
+    }
+
+    /// return a vector of atom indices that are neighbors to `atom_idx`
+    fn atom_neighbors(&self, _atom_idx: usize) -> Vec<usize> {
+        todo!();
     }
 }
