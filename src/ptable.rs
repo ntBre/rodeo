@@ -1,6 +1,6 @@
-// probably should have de-duplicated this. see atomic_data.org if these
-// need to be updated. I assumed the default valence was the first entry in
-// the allowed valences
+/// default valence charge, indexed by atomic number. NOTE probably should have
+/// de-duplicated this. see atomic_data.org if these need to be updated. I
+/// assumed the default valence was the first entry in the allowed valences
 pub(crate) const DEFAULT_VALENCE: [isize; 121] = [
     -1, 1, 0, 1, 2, 3, 4, 3, 2, 1, 0, 1, 2, 3, 4, 3, 2, 1, 0, 1, 2, -1, -1, -1,
     -1, -1, -1, -1, -1, -1, -1, 3, 4, 3, 2, 1, 0, 1, 2, -1, -1, -1, -1, -1, -1,
@@ -9,6 +9,9 @@ pub(crate) const DEFAULT_VALENCE: [isize; 121] = [
     0, 1, 2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
 ];
+
+/// table reporting whether or not a given atom is left of Carbon, indexed by
+/// atomic number
 pub(crate) const IS_EARLY_ATOM: [bool; 119] = [
     false, // #0 *
     false, // #1 H
