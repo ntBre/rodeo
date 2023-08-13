@@ -149,6 +149,8 @@ pub struct RWMol {
     /// some collection of conformers. looks like this is supposed to be some
     /// kind of dictionary? called `d_conf` in C++
     conformers: Vec<Conformer>,
+
+    extra_rings: Vec<Vec<isize>>,
 }
 
 impl RWMol {
@@ -338,8 +340,99 @@ impl RWMol {
         // in-line bond.updatePropertyCache, which does nothing
     }
 
-    fn symmetrize_sssr(&self) {
-        todo!()
+    fn symmetrize_sssr(&mut self) -> usize {
+        let mut res: Vec<Vec<isize>> = Vec::new();
+        let mut sssrs: Vec<Vec<isize>> = Vec::new();
+
+        // FIX: need to set flag here the symmetrization has been done in order
+        // to avoid repeating this work
+        let include_dative_bonds = false; // default and not passed
+        self.find_sssr(&mut sssrs, include_dative_bonds);
+
+        res.reserve(sssrs.len());
+        for r in &sssrs {
+            res.push(r.clone());
+        }
+
+        // now check if there are any extra rings on the molecule
+        if self.extra_rings.is_empty() {
+            // no extra rings nothing to be done
+            return res.len();
+        }
+        let extras = self.extra_rings.clone();
+
+        // convert the rings to bond ids
+        let bondsssrs = Vec::new();
+        self.convert_to_bonds(&sssrs, &bondsssrs);
+
+        //
+        // For each "extra" ring, figure out if it could replace a single ring
+        // in the SSSR. A ring could be swapped out if:
+        //
+        // * They are the same size
+        // * The replacement doesn't remove any bonds from the union of the
+        //   bonds in the SSSR.
+        //
+        // The latter can be checked by determining if the SSSR ring is the
+        // unique provider of any ring bond. If it is, the replacement ring must
+        // also provide that bond.
+        //
+        // May miss extra rings that would need to swap two (or three...) rings
+        // to be included.
+
+        // counts of each bond
+        let mut bond_counts = vec![0; self.num_bonds];
+        for r in &bondsssrs {
+            for b in r {
+                bond_counts[*b as usize] += 1;
+            }
+        }
+
+        let extra_ring: Vec<isize> = Vec::new();
+        for extra_atom_ring in &extras {
+            self.convert_to_bonds2(extra_atom_ring, &extra_ring);
+            for ring in &bondsssrs {
+                if ring.len() != extra_ring.len() {
+                    continue;
+                }
+
+                // If `ring` is the only provider of some bond, extraRing must
+                // also provide that bond.
+                let mut share_bond = false;
+                let mut replaces_all_unique_bonds = true;
+                for bond_id in ring {
+                    let bond_count = bond_counts[*bond_id as usize];
+                    if bond_count == 1 || !share_bond {
+                        let position =
+                            extra_ring.iter().find(|&b| b == bond_id);
+                        // TODO this is going to be some kind o if let on
+                        // whether the find passed
+                        if position.is_some() {
+                            share_bond = true;
+                        } else if bond_count == 1 {
+                            // 1 means `ring` is the only ring in the SSSR to
+                            // provide this bond, and extraRing did not provide
+                            // it (so extraRing is not an acceptable
+                            // substitution in the SSSR for ring)
+                            replaces_all_unique_bonds = false;
+                        }
+                    }
+                }
+
+                if share_bond && replaces_all_unique_bonds {
+                    res.push(extra_atom_ring.clone());
+                    self.store_ring_info(extra_atom_ring.to_vec());
+                    break;
+                }
+            }
+        }
+
+        // we keep the property as just the vector
+        if !self.extra_rings.is_empty() {
+            self.extra_rings.clear();
+        }
+
+        res.len()
     }
 
     fn kekulize(&self) {
@@ -650,9 +743,8 @@ impl RWMol {
         // - otherwise take return difference between next larger allowed
         //   valence and "ev"
         // if "ev" is greater than all allowed valences for the atom raise an
-        // exception
-        // finally aromatic cases are dealt with differently - these atoms are allowed
-        // only default valences
+        // exception finally aromatic cases are dealt with differently - these
+        // atoms are allowed only default valences
         let valens = &VALENCE_LIST[atomic_num];
 
         let atom = &self[atom_idx];
@@ -679,13 +771,13 @@ impl RWMol {
         //  IV), but we must assume on which side of the line C
         //  falls... an assumption which will not always be correct.  For
         //  example:
-        //  - Electropositive Carbon: a C with three singly-bonded
-        //    neighbors (DV = 4, SBO = 3, CHG = 1) and a positive charge (a
-        //    'stable' carbocation) should not have any hydrogens added.
-        //  - Electronegative Carbon: C in isonitrile, R[N+]#[C-] (DV = 4, SBO = 3,
-        //    CHG = -1), also should not have any hydrogens added.
+        //  - Electropositive Carbon: a C with three singly-bonded neighbors (DV
+        //    = 4, SBO = 3, CHG = 1) and a positive charge (a 'stable'
+        //    carbocation) should not have any hydrogens added.
+        //  - Electronegative Carbon: C in isonitrile, R[N+]#[C-] (DV = 4, SBO =
+        //    3, CHG = -1), also should not have any hydrogens added.
         //  Because isonitrile seems more relevant to pharma problems, we'll be
-        //  making the second assumption:  *Carbon is electronegative*.
+        //  making the second assumption: *Carbon is electronegative*.
         //
         // So assuming you read all the above stuff - you know why we are
         // changing signs for "chg" here
@@ -702,13 +794,13 @@ impl RWMol {
             if explicit_plus_rad_v <= dv + chg {
                 res = dv + chg - explicit_plus_rad_v;
             } else {
-                // As we assume when finding the explicitPlusRadValence if we are
-                // aromatic we should not be adding any hydrogen and already
+                // As we assume when finding the explicitPlusRadValence if we
+                // are aromatic we should not be adding any hydrogen and already
                 // be at an accepted valence state,
 
                 // FIX: this is just ERROR checking and probably moot - the
-                // explicitPlusRadValence function called above should assure us that
-                // we satisfy one of the accepted valence states for the
+                // explicitPlusRadValence function called above should assure us
+                // that we satisfy one of the accepted valence states for the
                 // atom. The only diff I can think of is in the way we handle
                 // formal charge here vs the explicit valence function.
                 let mut satis = false;
@@ -722,7 +814,10 @@ impl RWMol {
                     }
                 }
                 if strict && !satis {
-                    panic!("Explicit valence for aromatic atom # {atom_idx} not equal to any accepted valence");
+                    panic!(
+                        "Explicit valence for aromatic atom # {atom_idx} \
+                        not equal to any accepted valence"
+                    );
                 }
                 res = 0;
             }
@@ -744,7 +839,11 @@ impl RWMol {
                 if strict && *valens.last().unwrap() != -1 {
                     // this means that the explicit valence is greater than any
                     // allowed valence for the atoms - raise an error
-                    panic!("Explicit valence for atom # {atom_idx} {} greater than permitted", SYMBOL[atomic_num]);
+                    panic!(
+                        "Explicit valence for atom # {atom_idx} {} \
+                        greater than permitted",
+                        SYMBOL[atomic_num]
+                    );
                 } else {
                     res = 0;
                 }
@@ -764,6 +863,34 @@ impl RWMol {
         self.get_bonds().filter(move |bond| {
             bond.begin_atom_index == atom_idx || bond.end_atom_index == atom_idx
         })
+    }
+
+    fn find_sssr(
+        &self,
+        _sssrs: &mut Vec<Vec<isize>>,
+        _include_dative_bonds: bool,
+    ) {
+        todo!()
+    }
+
+    fn convert_to_bonds(
+        &self,
+        _sssrs: &Vec<Vec<isize>>,
+        _bondsssrs: &Vec<Vec<isize>>,
+    ) {
+        todo!()
+    }
+
+    fn store_ring_info(&self, _extra_atom_ring: Vec<isize>) {
+        todo!()
+    }
+
+    fn convert_to_bonds2(
+        &self,
+        _extra_atom_ring: &Vec<isize>,
+        _extra_ring: &Vec<isize>,
+    ) {
+        todo!()
     }
 }
 
