@@ -4,6 +4,8 @@ use bond::{Bond, BondType};
 use graph::Graph;
 use ptable::{DEFAULT_VALENCE, IS_EARLY_ATOM};
 
+use crate::ptable::{OUTER_ELECS, SYMBOL};
+
 pub mod bond;
 mod graph;
 mod ptable;
@@ -479,7 +481,8 @@ impl RWMol {
         let atomic_number = self.atoms()[atom_idx].atomic_number;
         let dv = DEFAULT_VALENCE[atomic_number] as f64;
 
-        let mut chr = self.atoms()[atom_idx].formal_charge as f64;
+        let formal_charge = self.atoms()[atom_idx].formal_charge;
+        let mut chr = formal_charge as f64;
         if IS_EARLY_ATOM[atomic_number] {
             chr *= -1.0; // the usual correction for early atoms
         }
@@ -540,7 +543,26 @@ impl RWMol {
         let res = acc.round() as isize;
 
         if strict {
-            todo!();
+            let effective_valence;
+            if OUTER_ELECS[atomic_number] >= 4 {
+                effective_valence = res - formal_charge;
+            } else {
+                // for boron and co, we move to the right in PT, so adding extra
+                // valence means adding negative charge
+                effective_valence = res + formal_charge;
+            }
+            let valens = get_valence_list(atomic_number);
+
+            let max_valence = valens.last().unwrap();
+            // max_valence == -1 signifies that we'll take anything at the high
+            // end
+            if *max_valence > 0 && effective_valence > *max_valence {
+                panic!(
+                    "Explicit valence for atom # {} {atomic_number} {}, \
+                    {effective_valence}, is greater than permitted",
+                    atom_idx, SYMBOL[atomic_number]
+                );
+            }
         }
 
         self.atoms_mut()[atom_idx].explicit_valence = res;

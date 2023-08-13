@@ -12,6 +12,7 @@ follow this same pattern to ensure backwards compatibility.
 
 taken from rdkit atomic_data.cpp
 
+#+name: data
 | Atomic Number | Symbol |  rCov |   rB0 | rVdw | atomic mass | # outershell e- | most common isotope | most common iso mass | allowed valences |    |   |   |
 |---------------+--------+-------+-------+------+-------------+-----------------+---------------------+----------------------+------------------+----+---+---|
 |             0 | *      |     0 |     0 |    0 |           0 |               0 |                   0 |                    0 |               -1 |    |   |   |
@@ -135,3 +136,10 @@ taken from rdkit atomic_data.cpp
 |           116 | Lv     |  1.75 |     0 |  2.0 |         293 |               2 |                 293 |            293.20449 |               -1 |    |   |   |
 |           117 | Ts     |  1.65 |     0 |  2.0 |         292 |               2 |                 292 |            292.20746 |               -1 |    |   |   |
 |           118 | Og     |  1.57 |     0 |  2.0 |         294 |               2 |                 294 |            294.21392 |               -1 |    |   |   |
+
+#+begin_src awk :stdin data :results raw
+  { printf "\"%s\",\n", $2 }
+#+end_src
+
+#+RESULTS:
+"Number",
