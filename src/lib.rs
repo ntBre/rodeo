@@ -1,6 +1,9 @@
 #![feature(lazy_cell)]
 
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    ops::{Index, IndexMut},
+};
 
 use bond::{Bond, BondType};
 use graph::Graph;
@@ -29,7 +32,9 @@ pub struct Atom {
     index: usize,
     chiral_tag: Chi,
     explicit_valence: isize,
+    implicit_valence: isize,
     num_explicit_hs: usize,
+    num_radical_electrons: usize,
 }
 
 impl Atom {
@@ -40,6 +45,11 @@ impl Atom {
             formal_charge: 0,
             is_aromatic: false,
             index: 0,
+            // signal for not having been set. might make more sense for this to
+            // be optional then
+            explicit_valence: -1,
+            // guessing the same is true for implicit
+            implicit_valence: -1,
             ..Default::default()
         }
     }
@@ -361,7 +371,7 @@ impl RWMol {
     }
 
     #[inline]
-    fn atoms(&self) -> &Vec<Atom> {
+    const fn atoms(&self) -> &Vec<Atom> {
         &self.d_graph.vertices
     }
 
@@ -573,13 +583,200 @@ impl RWMol {
 
     fn calc_implicit_valence(
         &mut self,
-        _atom_idx: usize,
-        _strict: bool,
+        atom_idx: usize,
+        strict: bool,
     ) -> isize {
-        todo!()
+        if self[atom_idx].explicit_valence == -1 {
+            self.calc_explicit_valence(atom_idx, strict);
+        }
+
+        // special cases
+        if self[atom_idx].atomic_number == 0 {
+            self[atom_idx].implicit_valence = 0;
+            return 0;
+        }
+
+        // sad but true
+        let bonds: Vec<&Bond> = self.get_atom_bonds(atom_idx).collect();
+        for bnd in bonds {
+            if bnd.has_complex_bond_type() {
+                self[atom_idx].implicit_valence = 0;
+                return 0;
+            }
+        }
+        if self[atom_idx].explicit_valence == 0
+            && self[atom_idx].atomic_number == 1
+            && self[atom_idx].num_radical_electrons == 0
+        {
+            if self[atom_idx].formal_charge == 1
+                || self[atom_idx].formal_charge == -1
+            {
+                self[atom_idx].implicit_valence = 0;
+                return 0;
+            } else if self[atom_idx].formal_charge == 0 {
+                self[atom_idx].implicit_valence = 1;
+                return 1;
+            } else {
+                if strict {
+                    panic!(
+                        "Unreasonable formal charge on hydrogen # {atom_idx}"
+                    );
+                } else {
+                    self[atom_idx].implicit_valence = 0;
+                    return 0;
+                }
+            }
+        }
+
+        // this is basically the difference between the allowed valence of the
+        // atom and the explicit valence already specified - tells how many H's
+        // to add
+        let mut res;
+
+        // The d-block and f-block of the periodic table (i.e. transition metals,
+        // lanthanoids and actinoids) have no default valence.
+        let atomic_num = self[atom_idx].atomic_number;
+        let dv = DEFAULT_VALENCE[atomic_num];
+        if dv == -1 {
+            self[atom_idx].implicit_valence = 0;
+            return 0;
+        }
+
+        // here is how we are going to deal with the possibility of
+        // multiple valences
+        // - check the explicit valence "ev"
+        // - if it is already equal to one of the allowed valences for the
+        //    atom return 0
+        // - otherwise take return difference between next larger allowed
+        //   valence and "ev"
+        // if "ev" is greater than all allowed valences for the atom raise an
+        // exception
+        // finally aromatic cases are dealt with differently - these atoms are allowed
+        // only default valences
+        let valens = &VALENCE_LIST[atomic_num];
+
+        let atom = &self[atom_idx];
+        let explicit_plus_rad_v =
+            atom.explicit_valence + atom.num_radical_electrons as isize;
+        let mut chg = atom.formal_charge;
+
+        // NOTE: this is here to take care of the difference in element on
+        // the right side of the carbon vs left side of carbon
+        // For elements on the right side of the periodic table
+        // (electronegative elements):
+        //     NHYD = V - SBO + CHG
+        // For elements on the left side of the periodic table
+        // (electropositive elements):
+        //      NHYD = V - SBO - CHG
+        // This reflects that hydrogen adds to, for example, O as H+ while
+        // it adds to Na as H-.
+
+        // V = valence
+        // SBO = Sum of bond orders
+        // CHG = Formal charge
+
+        //  It seems reasonable that the line is drawn at Carbon (in Group
+        //  IV), but we must assume on which side of the line C
+        //  falls... an assumption which will not always be correct.  For
+        //  example:
+        //  - Electropositive Carbon: a C with three singly-bonded
+        //    neighbors (DV = 4, SBO = 3, CHG = 1) and a positive charge (a
+        //    'stable' carbocation) should not have any hydrogens added.
+        //  - Electronegative Carbon: C in isonitrile, R[N+]#[C-] (DV = 4, SBO = 3,
+        //    CHG = -1), also should not have any hydrogens added.
+        //  Because isonitrile seems more relevant to pharma problems, we'll be
+        //  making the second assumption:  *Carbon is electronegative*.
+        //
+        // So assuming you read all the above stuff - you know why we are
+        // changing signs for "chg" here
+        if IS_EARLY_ATOM[atomic_num] {
+            chg *= -1;
+        }
+        // special case for carbon - see GitHub #539
+        if atomic_num == 6 && chg > 0 {
+            chg = -chg;
+        }
+
+        // if we have an aromatic case treat it differently
+        if atom.is_aromatic {
+            if explicit_plus_rad_v <= dv + chg {
+                res = dv + chg - explicit_plus_rad_v;
+            } else {
+                // As we assume when finding the explicitPlusRadValence if we are
+                // aromatic we should not be adding any hydrogen and already
+                // be at an accepted valence state,
+
+                // FIX: this is just ERROR checking and probably moot - the
+                // explicitPlusRadValence function called above should assure us that
+                // we satisfy one of the accepted valence states for the
+                // atom. The only diff I can think of is in the way we handle
+                // formal charge here vs the explicit valence function.
+                let mut satis = false;
+                for vi in valens {
+                    if *vi < 0 {
+                        break;
+                    }
+                    if explicit_plus_rad_v == ((*vi) + chg) {
+                        satis = true;
+                        break;
+                    }
+                }
+                if strict && !satis {
+                    panic!("Explicit valence for aromatic atom # {atom_idx} not equal to any accepted valence");
+                }
+                res = 0;
+            }
+        } else {
+            // non-aromatic case we are allowed to have non default valences
+            // and be able to add hydrogens
+            res = -1;
+            for vi in valens {
+                if *vi < 0 {
+                    break;
+                }
+                let tot = (*vi) + chg;
+                if explicit_plus_rad_v <= tot {
+                    res = tot - explicit_plus_rad_v;
+                    break;
+                }
+            }
+            if res < 0 {
+                if strict && *valens.last().unwrap() != -1 {
+                    // this means that the explicit valence is greater than any
+                    // allowed valence for the atoms - raise an error
+                    panic!("Explicit valence for atom # {atom_idx} {} greater than permitted", SYMBOL[atomic_num]);
+                } else {
+                    res = 0;
+                }
+            }
+        }
+
+        self[atom_idx].implicit_valence = res;
+        return res;
     }
 
     fn get_num_explicit_hs(&self, atom_idx: usize) -> f64 {
-        self.atoms()[atom_idx].num_explicit_hs as f64
+        self[atom_idx].num_explicit_hs as f64
+    }
+
+    /// assuming that this gives the bonds involving `atom_idx`
+    fn get_atom_bonds(&self, atom_idx: usize) -> impl Iterator<Item = &Bond> {
+        self.get_bonds().filter(move |bond| {
+            bond.begin_atom_index == atom_idx || bond.end_atom_index == atom_idx
+        })
+    }
+}
+
+impl Index<usize> for RWMol {
+    type Output = Atom;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.atoms()[index]
+    }
+}
+
+impl IndexMut<usize> for RWMol {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.atoms_mut()[index]
     }
 }

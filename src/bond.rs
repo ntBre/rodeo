@@ -133,4 +133,15 @@ impl Bond {
         }
         res
     }
+
+    pub(crate) fn has_complex_bond_type(&self) -> bool {
+        if !self.has_query() {
+            return false;
+        }
+        todo!();
+    }
+
+    const fn has_query(&self) -> bool {
+        false
+    }
 }
