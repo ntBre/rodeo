@@ -1,8 +1,10 @@
+#![feature(lazy_cell)]
+
 use std::collections::HashMap;
 
 use bond::{Bond, BondType};
 use graph::Graph;
-use ptable::{DEFAULT_VALENCE, IS_EARLY_ATOM};
+use ptable::{DEFAULT_VALENCE, IS_EARLY_ATOM, VALENCE_LIST};
 
 use crate::ptable::{OUTER_ELECS, SYMBOL};
 
@@ -502,12 +504,12 @@ impl RWMol {
             //    sulfur here : O=c1ccs(=O)cc1
             //    nitrogen here : c1cccn1C
             let mut pval = dv + chr;
-            let valens = get_valence_list(atomic_number);
+            let valens = &VALENCE_LIST[atomic_number];
             for val in valens {
-                if val == -1 {
+                if *val == -1 {
                     break;
                 }
-                let mut val = val as f64;
+                let mut val = *val as f64;
                 val += chr;
                 if val > acc {
                     break;
@@ -551,7 +553,7 @@ impl RWMol {
                 // valence means adding negative charge
                 effective_valence = res + formal_charge;
             }
-            let valens = get_valence_list(atomic_number);
+            let valens = &VALENCE_LIST[atomic_number];
 
             let max_valence = valens.last().unwrap();
             // max_valence == -1 signifies that we'll take anything at the high
@@ -580,8 +582,4 @@ impl RWMol {
     fn get_num_explicit_hs(&self, atom_idx: usize) -> f64 {
         self.atoms()[atom_idx].num_explicit_hs as f64
     }
-}
-
-fn get_valence_list(_atomic_number: usize) -> Vec<isize> {
-    todo!()
 }
