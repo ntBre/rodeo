@@ -122,16 +122,15 @@ impl Bond {
         {
             return 0.0;
         }
-        let res;
+
         use BondType::*;
         if matches!(self.bond_type, Dative | DativeOne)
             && atom_idx != self.end_atom_index
         {
-            res = 0.0;
+            0.0
         } else {
-            res = self.bond_type.into();
+            self.bond_type.into()
         }
-        res
     }
 
     pub(crate) fn has_complex_bond_type(&self) -> bool {

@@ -626,7 +626,7 @@ impl RWMol {
             // valence is 3 or the bridging N in c1ccn2cncc2c1, which starts
             // with a valence of 4.5, but can be happily kekulized down to a
             // valence of 3
-            if (acc - pval) as f64 <= 1.5 {
+            if (acc - pval) <= 1.5 {
                 acc = pval;
             }
         }
@@ -648,14 +648,13 @@ impl RWMol {
         let res = acc.round() as isize;
 
         if strict {
-            let effective_valence;
-            if OUTER_ELECS[atomic_number] >= 4 {
-                effective_valence = res - formal_charge;
+            let effective_valence = if OUTER_ELECS[atomic_number] >= 4 {
+                res - formal_charge
             } else {
                 // for boron and co, we move to the right in PT, so adding extra
                 // valence means adding negative charge
-                effective_valence = res + formal_charge;
-            }
+                res + formal_charge
+            };
             let valens = &VALENCE_LIST[atomic_number];
 
             let max_valence = valens.last().unwrap();
@@ -709,15 +708,11 @@ impl RWMol {
             } else if self[atom_idx].formal_charge == 0 {
                 self[atom_idx].implicit_valence = 1;
                 return 1;
+            } else if strict {
+                panic!("Unreasonable formal charge on hydrogen # {atom_idx}");
             } else {
-                if strict {
-                    panic!(
-                        "Unreasonable formal charge on hydrogen # {atom_idx}"
-                    );
-                } else {
-                    self[atom_idx].implicit_valence = 0;
-                    return 0;
-                }
+                self[atom_idx].implicit_valence = 0;
+                return 0;
             }
         }
 
@@ -851,7 +846,7 @@ impl RWMol {
         }
 
         self[atom_idx].implicit_valence = res;
-        return res;
+        res
     }
 
     fn get_num_explicit_hs(&self, atom_idx: usize) -> f64 {
@@ -867,7 +862,7 @@ impl RWMol {
 
     fn find_sssr(
         &self,
-        _sssrs: &mut Vec<Vec<isize>>,
+        _sssrs: &mut [Vec<isize>],
         _include_dative_bonds: bool,
     ) {
         todo!()
@@ -875,8 +870,8 @@ impl RWMol {
 
     fn convert_to_bonds(
         &self,
-        _sssrs: &Vec<Vec<isize>>,
-        _bondsssrs: &Vec<Vec<isize>>,
+        _sssrs: &[Vec<isize>],
+        _bondsssrs: &[Vec<isize>],
     ) {
         todo!()
     }
@@ -887,8 +882,8 @@ impl RWMol {
 
     fn convert_to_bonds2(
         &self,
-        _extra_atom_ring: &Vec<isize>,
-        _extra_ring: &Vec<isize>,
+        _extra_atom_ring: &[isize],
+        _extra_ring: &[isize],
     ) {
         todo!()
     }
