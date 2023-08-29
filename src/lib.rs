@@ -1304,21 +1304,23 @@ impl RWMol {
             return;
         }
         let allow_nontetrahedral_stereo = get_allow_nontetrahedral_chirality();
-        for atom in self.atoms_mut() {
+        for aid in 0..self.atoms().len() {
             // if we aren't replacing existing tags and the atom is already
             // tagged, punt
-            if !replace_existing_tags && !atom.chiral_tag.is_unspecified() {
+            if !replace_existing_tags
+                && !self.atoms()[aid].chiral_tag.is_unspecified()
+            {
                 continue;
             }
-            atom.set_chiral_tag(Chi::Unspecified);
-            let nz_degree = get_atom_nonzero_degree(atom);
-            let tnz_degree = nz_degree + atom.get_total_num_hs();
+            self.atoms_mut()[aid].set_chiral_tag(Chi::Unspecified);
+            let nz_degree = get_atom_nonzero_degree(&mut self.atoms_mut()[aid]);
+            let tnz_degree = nz_degree + self.atoms()[aid].get_total_num_hs();
             if nz_degree < 3 || tnz_degree > 6 {
                 // not enough explicit neighbors or too many total neighbors
                 continue;
             }
             if allow_nontetrahedral_stereo
-                && self.assign_nontedrahedral_chiral_type_from_3d(&conf, atom)
+                && self.assign_nontedrahedral_chiral_type_from_3d(&conf, aid)
             {
                 continue;
             }
@@ -1326,26 +1328,28 @@ impl RWMol {
             if tnz_degree > 4 {
                 continue;
             }
-            let anum = atom.atomic_number;
+            let anum = self.atoms()[aid].atomic_number;
             if anum != 16 && anum != 34 && tnz_degree != 4 {
                 // S and Se are special, just using the InChI list for now, not
                 // enough total neighbors
                 continue;
             }
-            let p0 = conf.get_atom_pos(atom.get_index());
+            let p0 = conf.get_atom_pos(self.atoms()[aid].get_index());
             let mut nbrs = [Point3D::zero(), Point3D::zero(), Point3D::zero()];
             let mut nbr_idx = 0;
             let mut has_wiggly_bond = false;
-            for bond in self.get_atom_bonds(atom.get_index()) {
-                has_wiggly_bond = bond.is_wiggly_bond(atom);
+            for bond in self.get_atom_bonds(self.atoms()[aid].get_index()) {
+                has_wiggly_bond = bond.is_wiggly_bond(&self.atoms()[aid]);
                 if has_wiggly_bond {
                     break;
                 }
-                if !bond_affects_atom_chirality(bond, atom) {
+                if !bond_affects_atom_chirality(bond, &self.atoms()[aid]) {
                     continue;
                 }
                 nbrs[nbr_idx] = conf
-                    .get_atom_pos(bond.get_other_atom_idx(atom.get_index()))
+                    .get_atom_pos(
+                        bond.get_other_atom_idx(self.atoms()[aid].get_index()),
+                    )
                     .clone();
                 nbr_idx += 1;
                 if nbr_idx == 3 {
@@ -1363,14 +1367,13 @@ impl RWMol {
 
             let chiral_vol = v1.dot(&v2.cross(&v3));
             if chiral_vol < -ZERO_VOLUME_TOL {
-                atom.set_chiral_tag(Chi::TetrahedralCW);
+                self.atoms_mut()[aid].set_chiral_tag(Chi::TetrahedralCW);
             } else if chiral_vol > ZERO_VOLUME_TOL {
-                atom.set_chiral_tag(Chi::TetrahedralCCW);
+                self.atoms_mut()[aid].set_chiral_tag(Chi::TetrahedralCCW);
             } else {
-                atom.set_chiral_tag(Chi::Unspecified);
+                self.atoms_mut()[aid].set_chiral_tag(Chi::Unspecified);
             }
         }
-        todo!();
     }
 
     fn clear_single_bond_dir_flags(&self) {
@@ -1381,16 +1384,17 @@ impl RWMol {
         todo!()
     }
 
+    // have to pass aid instead of atom because I need to mutate it
     fn assign_nontedrahedral_chiral_type_from_3d(
         &self,
         conf: &Conformer,
-        atom: &mut Atom,
+        aid: usize,
     ) -> bool {
         todo!()
     }
 }
 
-fn bond_affects_atom_chirality(bond: &Bond, atom: &mut Atom) -> bool {
+fn bond_affects_atom_chirality(bond: &Bond, atom: &Atom) -> bool {
     todo!()
 }
 

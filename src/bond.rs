@@ -193,7 +193,7 @@ impl Bond {
         self.negation = negation;
     }
 
-    pub(crate) fn is_wiggly_bond(&self, atom: &mut crate::Atom) -> bool {
+    pub(crate) fn is_wiggly_bond(&self, atom: &crate::Atom) -> bool {
         todo!()
     }
 
