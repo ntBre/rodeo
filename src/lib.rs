@@ -501,30 +501,12 @@ impl RWMol {
             }
         }
 
-        if sanitize {
-            if remove_hs {
-                mol.remove_hs(false, false);
-            } else {
-                mol.sanitize(SanitizeOptions::All);
-            }
-            // now that atom stereochem has been perceived, the wedging
-            // information is no longer needed, so we clear single bond dir
-            // flags:
-            mol.clear_single_bond_dir_flags();
-
-            // unlike DetectAtomStereoChemistry we call
-            // detectBondStereochemistry here after sanitization because we need
-            // the ring information:
-            mol.detect_bond_stereochemistry();
-            mol.assign_stereochemistry(true, true, true);
-        } else {
-            // we still need to do something about double bond stereochemistry
-            // (was github issue 337) now that atom stereochem has been
-            // perceived, the wedging information is no longer needed, so we
-            // clear single bond dir flags:
-            mol.clear_single_bond_dir_flags();
-            mol.detect_bond_stereochemistry();
-        }
+        // we still need to do something about double bond stereochemistry
+        // (was github issue 337) now that atom stereochem has been
+        // perceived, the wedging information is no longer needed, so we
+        // clear single bond dir flags:
+        mol.clear_single_bond_dir_flags();
+        mol.detect_bond_stereochemistry();
 
         // NOTE: skipping needsQueryScan check
         mol
