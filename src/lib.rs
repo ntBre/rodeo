@@ -1,5 +1,5 @@
 #![allow(unused)]
-#![feature(lazy_cell)]
+#![feature(lazy_cell, let_chains)]
 
 use std::{
     any::Any,
@@ -268,6 +268,7 @@ impl RWMol {
 
     /// load an [RWMol] from an SDF file
     pub fn from_sdf(file: impl AsRef<Path>) -> Self {
+        let strict_parsing = true;
         let s = read_to_string(dbg!(file.as_ref())).unwrap();
         println!("{s}");
         let mut lines = s.lines();
@@ -300,6 +301,7 @@ impl RWMol {
         }
 
         let mut mol = Self::new();
+        let mut chirality_possible = false;
         if ctab_version == 2000 {
             // in-line ParseV2000TAB
             let mut conf = Conformer::new(natoms);
@@ -309,13 +311,223 @@ impl RWMol {
                 parse_mol_block_atoms(natoms, &mut lines, &mut mol, &mut conf);
             }
             mol.add_conformer2(conf, true);
-            parse_mol_block_bonds(nbonds, lines, mol);
-            todo!("ParseMolBlockProperties");
+            chirality_possible = parse_mol_block_bonds(nbonds, &mut lines, mol);
+            // todo!("ParseMolBlockProperties");
+            let mut line = lines.next().unwrap();
+            if line.len() == 0 {
+                if !strict_parsing {
+                    todo!();
+                } else {
+                    panic!("unexpected blank line parsing Mol data");
+                }
+            } else {
+                let first = line.chars().nth(0).unwrap();
+                if first != 'M'
+                    && first != 'A'
+                    && first != 'V'
+                    && first != 'G'
+                    && first != 'S'
+                {
+                    // parseOldAtomList
+                    todo!();
+                }
+            }
+            let mut line_beg = &line[0..6];
+            // I'm pretty sure I'm doing something wrong here with when I take
+            // and update line/next_line. we'll see if any disasters strike
+            let mut sgroup_map: Vec<()> = Vec::new();
+            while let Some(next_line) = lines.next()
+                && line_beg != "M  END"
+                && &line[0..4] != "$$$$"
+            {
+                let first = line.chars().nth(0).unwrap();
+                if first == 'A' {
+                    todo!("parseatomalias")
+                } else if first == 'G' {
+                    eprintln!("warning deprecated group abbreviation");
+                    let line = next_line;
+                } else if first == 'V' {
+                    todo!("parseatomvallue");
+                } else if line_beg == "S  SKP" {
+                    let to_skip = line[6..9].trim().parse().unwrap();
+                    for i in 0..to_skip {
+                        let _ = lines.next();
+                    }
+                } else if (line_beg == "M  ALS") {
+                    // ParseNewAtomList(mol, tempStr, line);
+                    todo!();
+                } else if (line_beg == "M  ISO") {
+                    // ParseIsotopeLine(mol, tempStr, line);
+                    todo!();
+                } else if (line_beg == "M  RGP") {
+                    // ParseRGroupLabels(mol, tempStr, line);
+                    todo!();
+                } else if (line_beg == "M  RBC") {
+                    // ParseRingBondCountLine(mol, tempStr, line);
+                    todo!();
+                } else if (line_beg == "M  SUB") {
+                    // ParseSubstitutionCountLine(mol, tempStr, line);
+                    todo!();
+                } else if (line_beg == "M  UNS") {
+                    // ParseUnsaturationLine(mol, tempStr, line);
+                    todo!();
+                } else if (line_beg == "M  CHG") {
+                    // ParseChargeLine(mol, tempStr, firstChargeLine, line);
+                    // firstChargeLine = false;
+                    todo!();
+                } else if (line_beg == "M  RAD") {
+                    // ParseRadicalLine(mol, tempStr, firstChargeLine, line);
+                    // firstChargeLine = false;
+                    todo!();
+                } else if (line_beg == "M  PXA") {
+                    // ParsePXALine(mol, tempStr, line);
+                    todo!();
+
+                    /* SGroup parsing start */
+                } else if (line_beg == "M  STY") {
+                    // ParseSGroupV2000STYLine(sGroupMap, mol, tempStr, line, strictParsing);
+                    todo!();
+                } else if (line_beg == "M  SST") {
+                    // ParseSGroupV2000SSTLine(sGroupMap, mol, tempStr, line, strictParsing);
+                    todo!();
+                } else if (line_beg == "M  SLB") {
+                    // ParseSGroupV2000SLBLine(sGroupMap, mol, tempStr, line, strictParsing);
+                    todo!();
+                } else if (line_beg == "M  SCN") {
+                    // ParseSGroupV2000SCNLine(sGroupMap, mol, tempStr, line, strictParsing);
+                    todo!();
+                } else if (line_beg == "M  SDS") {
+                    // ParseSGroupV2000SDSLine(sGroupMap, mol, tempStr, line, strictParsing);
+                    todo!();
+                } else if (line_beg == "M  SAL" || line_beg == "M  SBL" || line_beg == "M  SPA") {
+                    // ParseSGroupV2000VectorDataLine(sGroupMap, mol, tempStr, line, strictParsing);
+                    todo!();
+                } else if (line_beg == "M  SMT") {
+                    // ParseSGroupV2000SMTLine(sGroupMap, mol, tempStr, line, strictParsing);
+                    todo!();
+                } else if (line_beg == "M  SDI") {
+                    // ParseSGroupV2000SDILine(sGroupMap, mol, tempStr, line, strictParsing);
+                    todo!();
+                } else if (line_beg == "M  CRS") {
+                    panic!("unsupported SGroup type");
+                } else if (line_beg == "M  SBV") {
+                    // ParseSGroupV2000SBVLine(sGroupMap, mol, tempStr, line, strictParsing);
+                    todo!();
+                } else if (line_beg == "M  SDT") {
+                    // ParseSGroupV2000SDTLine(sGroupMap, mol, tempStr, line, strictParsing);
+                    todo!();
+                } else if (line_beg == "M  SDD") {
+                    // ParseSGroupV2000SDDLine(sGroupMap, mol, tempStr, line, strictParsing);
+                    todo!();
+                } else if (line_beg == "M  SCD" || line_beg == "M  SED") {
+                    // ParseSGroupV2000SCDSEDLine(sGroupMap, dataFieldsMap, mol, tempStr, line,
+                    //     strictParsing, SCDcounter, lastDataSGroup,
+                    //     currentDataField);
+                    todo!();
+                } else if (line_beg == "M  SPL") {
+                    // ParseSGroupV2000SPLLine(sGroupMap, mol, tempStr, line, strictParsing);
+                    todo!();
+                } else if (line_beg == "M  SNC") {
+                    // ParseSGroupV2000SNCLine(sGroupMap, mol, tempStr, line, strictParsing);
+                    todo!();
+                } else if (line_beg == "M  SAP") {
+                    // ParseSGroupV2000SAPLine(sGroupMap, mol, tempStr, line, strictParsing);
+                    todo!();
+                } else if (line_beg == "M  SCL") {
+                    // ParseSGroupV2000SCLLine(sGroupMap, mol, tempStr, line, strictParsing);
+                    todo!();
+                } else if (line_beg == "M  SBT") {
+                    // ParseSGroupV2000SBTLine(sGroupMap, mol, tempStr, line, strictParsing);
+
+                    /* SGroup parsing end */
+                    todo!();
+                } else if (line_beg == "M  ZBO") {
+                    // ParseZBOLine(mol, tempStr, line);
+                    todo!();
+                } else if (line_beg == "M  ZCH") {
+                    // ParseZCHLine(mol, tempStr, line);
+                    todo!();
+                } else if (line_beg == "M  HYD") {
+                    // ParseHYDLine(mol, tempStr, line);
+                    todo!();
+                } else if (line_beg == "M  MRV") {
+                    // ParseMarvinSmartsLine(mol, tempStr, line);
+                    todo!();
+                } else if (line_beg == "M  APO") {
+                    // ParseAttachPointLine(mol, tempStr, line, strictParsing);
+                    todo!();
+                } else if (line_beg == "M  LIN") {
+                    // ParseLinkNodeLine(mol, tempStr, line);
+                    todo!();
+                }
+
+                line = next_line;
+                line_beg = &line[0..6];
+            }
+            if line.chars().nth(0).unwrap() == 'M' && &line[0..6] == "M  END" {
+                // all went well, make final updates to sgroups and add them to
+                // mol
+                for sgroup in sgroup_map {
+                    todo!();
+                }
+                // file_complete = true;
+            }
         } else {
             todo!("unhandled ctab version: {}", ctab_version);
         }
         println!("{}", s);
         todo!("finishMolProcessing");
+        mol.clear_all_atom_bookmarks();
+        mol.clear_all_bond_bookmarks();
+        for aid in 0..mol.atoms().len() {
+            mol.calc_explicit_valence(aid, false);
+        }
+        mol.process_mol_props();
+
+        // update the chirality and stereo-chemistry
+        //
+        // NOTE: we detect the stereochemistry before sanitizing/removing
+        // hydrogens because the removal of H atoms may actually remove the
+        // wedged bond from the molecule. This wipes out the only sign that
+        // chirality ever existed and makes us sad... so first perceive
+        // chirality, then remove the Hs and sanitize.
+        let conf = mol.conformers.first().unwrap();
+        if chirality_possible || conf.is_3d {
+            if !conf.is_3d {
+                mol.detect_atom_stereochemistry(conf);
+            } else {
+                mol.update_property_cache(false);
+                mol.assign_chiral_types_from_3d(conf.id, true);
+            }
+        }
+
+        if sanitize {
+            if remove_hs {
+                mol.remove_hs(false, false);
+            } else {
+                mol.sanitize(SanitizeOptions::All);
+            }
+            // now that atom stereochem has been perceived, the wedging
+            // information is no longer needed, so we clear single bond dir
+            // flags:
+            mol.clear_single_bond_dir_flags();
+
+            // unlike DetectAtomStereoChemistry we call
+            // detectBondStereochemistry here after sanitization because we need
+            // the ring information:
+            mol.detect_bond_stereochemistry();
+            mol.assign_stereochemistry(true, true, true);
+        } else {
+            // we still need to do something about double bond stereochemistry
+            // (was github issue 337) now that atom stereochem has been
+            // perceived, the wedging information is no longer needed, so we
+            // clear single bond dir flags:
+            mol.clear_single_bond_dir_flags();
+            mol.detect_bond_stereochemistry();
+        }
+
+        // NOTE: skipping needsQueryScan check
+        mol
     }
 
     /// corresponds to setProp("_Name", name)
@@ -1078,6 +1290,26 @@ impl RWMol {
 
     fn set_bond_bookmark(&mut self, aid: usize, i: usize) {
         self.bond_bookmarks.entry(i).or_insert(Vec::new()).push(aid);
+    }
+
+    fn clear_all_atom_bookmarks(&mut self) {
+        self.atom_bookmarks.clear();
+    }
+
+    fn clear_all_bond_bookmarks(&mut self) {
+        self.bond_bookmarks.clear()
+    }
+
+    fn process_mol_props(&mut self) {
+        todo!()
+    }
+
+    fn detect_atom_stereochemistry(&self, conf: &Conformer) {
+        todo!()
+    }
+
+    fn assign_chiral_types_from_3d(&self, id: usize, arg: bool) {
+        todo!()
     }
 }
 

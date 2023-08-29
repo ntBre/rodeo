@@ -200,9 +200,10 @@ fn parse_mol_file_atom_line(line: &str) -> (Atom, Point3D) {
 
 pub(crate) fn parse_mol_block_bonds(
     nbonds: usize,
-    mut lines: std::str::Lines<'_>,
+    lines: &mut std::str::Lines<'_>,
     mut mol: RWMol,
-) {
+) -> bool {
+    let mut chirality_possible = false;
     for i in 1..=nbonds {
         let line = lines.next().unwrap();
         let mut bond = parse_mol_file_bond_line(line);
@@ -210,7 +211,6 @@ pub(crate) fn parse_mol_block_bonds(
             bond.set_is_aromatic(true);
         }
         // bond might have chirality info associated with it
-        let mut chirality_possible = false;
         if !matches!(bond.bond_dir, BondDir::None | BondDir::Unknown) {
             chirality_possible = true;
         }
@@ -224,6 +224,8 @@ pub(crate) fn parse_mol_block_bonds(
         let bid = mol.add_bond2(bond);
         mol.set_bond_bookmark(bid, i);
     }
+
+    chirality_possible
 }
 
 fn parse_mol_file_bond_line(line: &str) -> Bond {
