@@ -59,16 +59,13 @@ fn parse_mol_file_atom_line(line: &str) -> (Atom, Point3D) {
         hcount = line[42..45].trim().parse().unwrap();
     }
     let mut res = Atom::default();
-    let is_complex_query_name =
-        COMPLEX_QUERIES.iter().find(|&&s| s == symb).is_some();
+    let is_complex_query_name = COMPLEX_QUERIES.iter().any(|&s| s == symb);
     if is_complex_query_name
         || symb == "L"
         || symb == "LP"
         || symb == "R"
         || symb == "R#"
-        || (symb.chars().nth(0).unwrap() == 'R'
-            && symb >= "R0"
-            && symb <= "R99")
+        || (symb.starts_with('R') && ("R0"..="R99").contains(&symb))
     {
         if is_complex_query_name || symb == "*" || symb == "R" {
             let mut query = Atom::new(0);
@@ -84,15 +81,17 @@ fn parse_mol_file_atom_line(line: &str) -> (Atom, Point3D) {
         } else {
             res.set_atomic_number(0);
         }
-        if mass_diff == 0 && symb.chars().nth(0).unwrap() == 'R' {
-            if symb.len() > 1 && symb >= "R0" && symb <= "R99" {
-                let rnumber = &symb[1..symb.len() - 1].parse().unwrap_or(-1);
-                if *rnumber >= 0 {
-                    res.set_isotope(*rnumber);
-                }
+        if mass_diff == 0
+            && symb.starts_with('R')
+            && symb.len() > 1
+            && ("R0"..="R99").contains(&symb)
+        {
+            let rnumber = &symb[1..symb.len() - 1].parse().unwrap_or(-1);
+            if *rnumber >= 0 {
+                res.set_isotope(*rnumber);
             }
         }
-        if symb.chars().nth(0).unwrap() == 'R' {
+        if symb.starts_with('R') {
             todo!("setRGPProps(symb, res)");
         }
     } else if symb == "D" {

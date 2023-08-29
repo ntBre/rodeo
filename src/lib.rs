@@ -314,7 +314,7 @@ impl RWMol {
                 parse_mol_block_bonds(nbonds, &mut lines, &mut mol);
             // todo!("ParseMolBlockProperties");
             let mut line = lines.next().unwrap();
-            if line.len() == 0 {
+            if line.is_empty() {
                 if !strict_parsing {
                     todo!();
                 } else {
@@ -667,7 +667,8 @@ impl RWMol {
         }
         let ret = conf.id;
         self.conformers.push(conf);
-        return ret;
+
+        ret
     }
 
     pub fn assign_stereochemistry_from_3d(&mut self) {
