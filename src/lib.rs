@@ -2,7 +2,9 @@
 
 use std::{
     collections::HashMap,
+    fs::read_to_string,
     ops::{Index, IndexMut},
+    path::Path,
 };
 
 use bond::{Bond, BondType};
@@ -107,7 +109,7 @@ pub enum AromaticityModel {
     Default,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 #[allow(unused)]
 struct Point3D {
     x: f64,
@@ -119,21 +121,46 @@ impl Point3D {
     fn new(x: f64, y: f64, z: f64) -> Self {
         Self { x, y, z }
     }
+
+    fn zero() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        }
+    }
 }
 
 /// Representation of a 2D or 3D conformation of a molecule as a vector of 3D
 /// points.
+#[derive(Default)]
 struct Conformer {
     positions: Vec<Point3D>,
+    is_3d: bool,
 }
 
 impl Conformer {
+    fn new(num_atoms: usize) -> Self {
+        Self {
+            positions: vec![Point3D::zero(); num_atoms],
+            ..Self::default()
+        }
+    }
+
     /// panics if `atom_id` is greater than usize::MAX lmao
     fn set_atom_pos(&mut self, atom_id: usize, new: Point3D) {
         if atom_id >= self.positions.len() {
             self.positions.resize_with(atom_id + 1, Point3D::default);
         }
         self.positions[atom_id] = new;
+    }
+
+    fn set_3d(&mut self, v: bool) {
+        self.is_3d = v;
+    }
+
+    fn has_non_zero_z_coords(&self) -> bool {
+        todo!()
     }
 }
 
@@ -151,6 +178,8 @@ pub struct RWMol {
     conformers: Vec<Conformer>,
 
     extra_rings: Vec<Vec<isize>>,
+
+    is_3d: bool,
 }
 
 impl RWMol {
@@ -160,6 +189,80 @@ impl RWMol {
             d_graph: Graph::default(),
             ..Self::default()
         }
+    }
+
+    /// load an [RWMol] from an SDF file
+    pub fn from_sdf(file: impl AsRef<Path>) -> Self {
+        let s = read_to_string(dbg!(file.as_ref())).unwrap();
+        let mut lines = s.lines();
+
+        let name = lines.next().unwrap();
+        let info = lines.next().unwrap();
+        let comm = lines.next().unwrap();
+
+        // counts line
+        let line = lines.next().unwrap();
+        let natoms = line[0..3].trim().parse::<usize>().unwrap();
+        let nbonds = line[3..6].trim().parse::<usize>().unwrap();
+        let nlists = line[6..9].trim().parse::<usize>().unwrap();
+        let chiral_flag = line[12..15].trim().parse::<usize>().unwrap();
+        let ns_text = line[15..18].trim().parse::<usize>().unwrap();
+        let n_rxn_components = line[18..21].trim().parse::<usize>().unwrap();
+        let n_reactants = line[21..24].trim().parse::<usize>().unwrap();
+        let n_products = line[24..27].trim().parse::<usize>().unwrap();
+        let n_intermediates = line[27..30].trim().parse::<usize>().unwrap();
+
+        let mut ctab_version = 2000;
+        if line.len() > 35 {
+            if line.len() < 39 || line.chars().nth(34).unwrap() != 'V' {
+                panic!("CTAB version string invalid");
+            } else if &line[34..39] == "V3000" {
+                ctab_version = 3000;
+            } else if &line[34..39] != "V2000" {
+                panic!("unsupported CTAB version {}", &line[34..39]);
+            }
+        }
+
+        let mut mol = Self::new();
+        if ctab_version == 2000 {
+            // in-line ParseV2000TAB
+            let mut conf = Conformer::new(natoms);
+            if natoms == 0 {
+                conf.set_3d(false);
+            } else {
+                // in-line ParseMolBlockAtoms
+                for i in 1..=natoms {
+                    let line = lines.next().unwrap();
+                    // in-line ParseMolFileAtomLine
+                    let (atom, pos) = {
+                        todo!();
+                    };
+                    let aid = mol.add_atom(atom);
+                    conf.set_atom_pos(aid, pos);
+                    mol.set_atom_bookmark(atom, i);
+                }
+
+                let nonzero_z = conf.has_non_zero_z_coords();
+                if mol.is_3d {
+                    conf.set_3d(true);
+                    if !nonzero_z {
+                        eprintln!(
+                            "warning: molecule is tagged as 3d,\
+                                but all Z coords are zero"
+                        );
+                    }
+                } else {
+                    conf.set_3d(nonzero_z);
+                }
+            }
+            mol.add_conformer2(conf, true);
+            todo!("ParseMolBlockBonds");
+            todo!("ParseMolBlockProperties");
+        } else {
+            todo!("unhandled ctab version: {}", ctab_version);
+        }
+        println!("{}", s);
+        todo!("finishMolProcessing");
     }
 
     /// corresponds to setProp("_Name", name)
@@ -290,6 +393,10 @@ impl RWMol {
 
     pub fn add_conformer(&mut self, _coordinates: &[f64]) {
         todo!();
+    }
+
+    fn add_conformer2(&mut self, conf: Conformer, arg: bool) {
+        todo!()
     }
 
     pub fn assign_stereochemistry_from_3d(&mut self) {
@@ -885,6 +992,10 @@ impl RWMol {
         _extra_atom_ring: &[isize],
         _extra_ring: &[isize],
     ) {
+        todo!()
+    }
+
+    fn set_atom_bookmark(&mut self, atom: Atom, i: usize) {
         todo!()
     }
 }
