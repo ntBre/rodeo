@@ -20,7 +20,7 @@ mod ptable;
 
 const COMPLEX_QUERIES: [&str; 8] = ["A", "AH", "Q", "QH", "X", "XH", "M", "MH"];
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub enum Chi {
     TetrahedralCCW,
     TetrahedralCW,
@@ -28,9 +28,10 @@ pub enum Chi {
     None,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Atom {
     atomic_number: usize,
+    isotope: isize,
     name: String,
     formal_charge: isize,
     is_aromatic: bool,
@@ -40,6 +41,16 @@ pub struct Atom {
     implicit_valence: isize,
     num_explicit_hs: usize,
     num_radical_electrons: usize,
+    no_implicit: bool,
+    dummy_label: String,
+    parity: usize,
+    stereo_care: usize,
+    tot_valence: usize,
+    rxn_role: usize,
+    rxn_component: usize,
+    map_number: usize,
+    inversion_flag: usize,
+    exact_change_flag: usize,
 }
 
 impl Atom {
@@ -85,6 +96,50 @@ impl Atom {
 
     pub fn set_chiral_tag(&mut self, chiral_tag: Chi) {
         self.chiral_tag = chiral_tag;
+    }
+
+    pub fn set_no_implicit(&mut self, no_implicit: bool) {
+        self.no_implicit = no_implicit;
+    }
+
+    pub fn set_atomic_number(&mut self, atomic_number: usize) {
+        self.atomic_number = atomic_number;
+    }
+
+    pub fn set_isotope(&mut self, isotope: isize) {
+        self.isotope = isotope;
+    }
+
+    pub fn set_parity(&mut self, parity: usize) {
+        self.parity = parity;
+    }
+
+    pub fn set_stereo_care(&mut self, stereo_care: usize) {
+        self.stereo_care = stereo_care;
+    }
+
+    pub fn set_tot_valence(&mut self, tot_valence: usize) {
+        self.tot_valence = tot_valence;
+    }
+
+    pub fn set_rxn_role(&mut self, rxn_role: usize) {
+        self.rxn_role = rxn_role;
+    }
+
+    pub fn set_rxn_component(&mut self, rxn_component: usize) {
+        self.rxn_component = rxn_component;
+    }
+
+    pub fn set_map_number(&mut self, map_number: usize) {
+        self.map_number = map_number;
+    }
+
+    pub fn set_inversion_flag(&mut self, inversion_flag: usize) {
+        self.inversion_flag = inversion_flag;
+    }
+
+    pub fn set_exact_change_flag(&mut self, exact_change_flag: usize) {
+        self.exact_change_flag = exact_change_flag;
     }
 }
 
@@ -286,14 +341,14 @@ impl RWMol {
                                 if symb == "*" || symb == "R" {
                                     // according to the MDL spec, these match
                                     // anything
-                                    query.set_query(make_atom_null_query());
+                                    todo!("query.set_query(make_atom_null_query())");
                                 } else if is_complex_query_name {
-                                    query.convert_complex_name(symb);
+                                    todo!("query.convert_complex_name(symb);");
                                 }
                                 res = query;
                                 res.set_no_implicit(true);
                             } else {
-                                res.set_atomic_num(0);
+                                res.set_atomic_number(0);
                             }
                             if mass_diff == 0
                                 && symb.chars().nth(0).unwrap() == 'R'
@@ -314,13 +369,13 @@ impl RWMol {
                                 todo!("setRGPProps(symb, res)");
                             }
                         } else if symb == "D" {
-                            res.set_atomic_num(1);
+                            res.set_atomic_number(1);
                             res.set_isotope(2);
                         } else if symb == "T" {
-                            res.set_atomic_num(1);
+                            res.set_atomic_number(1);
                             res.set_isotope(3);
                         } else if symb == "Pol" || symb == "Mod" {
-                            res.set_atomic_num(0);
+                            res.set_atomic_number(0);
                             res.dummy_label = symb.to_owned();
                         } else {
                             let s: Vec<_> = symb.chars().collect();
@@ -332,7 +387,9 @@ impl RWMol {
                             } else {
                                 symb.to_string()
                             };
-                            lookup_atomic_number(res, symb);
+                            let num =
+                                SYMBOL.iter().position(|&s| s == symb).unwrap();
+                            res.set_atomic_number(num);
                         }
                         if chg != 0 {
                             res.set_formal_charge(chg);
@@ -376,60 +433,58 @@ impl RWMol {
                         }
 
                         if (line.len() >= 48 && &line[45..45 + 3] != "  0") {
-                            let mut stereoCare = 0;
-                            stereoCare =
+                            let mut stereo_care = 0;
+                            stereo_care =
                                 line[45..45 + 3].trim().parse().unwrap();
                             res.set_stereo_care(stereo_care);
                         }
                         if (line.len() >= 51 && &line[48..48 + 3] != "  0") {
-                            let mut totValence = 0;
-                            totValence =
+                            let mut tot_valence = 0;
+                            tot_valence =
                                 line[48..48 + 3].trim().parse().unwrap();
-                            if (totValence != 0) {
+                            if (tot_valence != 0) {
                                 // only set if it's a non-default value
-                                res.set_tot_valence(totValence);
+                                res.set_tot_valence(tot_valence);
                             }
                         }
                         if (line.len() >= 57 && &line[54..54 + 3] != "  0") {
-                            let mut rxnRole = 0;
-                            rxnRole = line[54..54 + 3].trim().parse().unwrap();
-                            if (rxnRole != 0) {
+                            let mut rxn_role = 0;
+                            rxn_role = line[54..54 + 3].trim().parse().unwrap();
+                            if (rxn_role != 0) {
                                 // only set if it's a non-default value
-                                res.set_molRxnRole(rxnRole);
+                                res.set_rxn_role(rxn_role);
                             }
                         }
                         if (line.len() >= 60 && &line[57..57 + 3] != "  0") {
-                            let mut rxnComponent = 0;
-                            rxnComponent =
+                            let mut rxn_component = 0;
+                            rxn_component =
                                 line[57..57 + 3].trim().parse().unwrap();
-                            if (rxnComponent != 0) {
+                            if (rxn_component != 0) {
                                 // only set if it's a non-default value
-                                res.set_molRxnComponent(rxnComponent);
+                                res.set_rxn_component(rxn_component);
                             }
                         }
                         if (line.len() >= 63 && &line[60..60 + 3] != "  0") {
-                            let mut atomMapNumber = 0;
-                            atomMapNumber =
+                            let mut atom_map_number = 0;
+                            atom_map_number =
                                 line[60..60 + 3].trim().parse().unwrap();
-                            res.set_molAtomMapNumber(atomMapNumber);
+                            res.set_map_number(atom_map_number);
                         }
                         if (line.len() >= 66 && &line[63..63 + 3] != "  0") {
-                            let mut inversionFlag = 0;
-                            inversionFlag =
+                            let mut inversion_flag = 0;
+                            inversion_flag =
                                 line[63..63 + 3].trim().parse().unwrap();
-                            res.set_molInversionFlag(inversionFlag);
+                            res.set_inversion_flag(inversion_flag);
                         }
                         if (line.len() >= 69 && &line[66..66 + 3] != "  0") {
-                            let mut exactChangeFlag = 0;
-                            exactChangeFlag =
+                            let mut exact_change_flag = 0;
+                            exact_change_flag =
                                 line[66..66 + 3].trim().parse().unwrap();
-                            res.set_molExactChangeFlag(exactChangeFlag);
+                            res.set_exact_change_flag(exact_change_flag);
                         }
-                        return res;
-
-                        todo!();
+                        (res, pos)
                     };
-                    let aid = mol.add_atom(atom);
+                    let aid = mol.add_atom(atom.clone());
                     conf.set_atom_pos(aid, pos);
                     mol.set_atom_bookmark(atom, i);
                 }
