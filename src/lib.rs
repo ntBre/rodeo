@@ -21,9 +21,11 @@ use crate::{
 
 pub mod bond;
 mod graph;
+mod point3d;
 mod ptable;
-
 mod sdf;
+
+pub(crate) use point3d::*;
 
 const COMPLEX_QUERIES: [&str; 8] = ["A", "AH", "Q", "QH", "X", "XH", "M", "MH"];
 
@@ -31,8 +33,19 @@ const COMPLEX_QUERIES: [&str; 8] = ["A", "AH", "Q", "QH", "X", "XH", "M", "MH"];
 pub enum Chi {
     TetrahedralCCW,
     TetrahedralCW,
-    #[default]
     None,
+    #[default]
+    Unspecified,
+}
+
+impl Chi {
+    /// Returns `true` if the chi is [`Unspecified`].
+    ///
+    /// [`Unspecified`]: Chi::Unspecified
+    #[must_use]
+    pub fn is_unspecified(&self) -> bool {
+        matches!(self, Self::Unspecified)
+    }
 }
 
 #[derive(Clone, Default)]
@@ -148,6 +161,10 @@ impl Atom {
     pub fn set_exact_change_flag(&mut self, exact_change_flag: usize) {
         self.exact_change_flag = exact_change_flag;
     }
+
+    fn get_total_num_hs(&self) -> usize {
+        todo!()
+    }
 }
 
 bitflags::bitflags! {
@@ -174,34 +191,11 @@ pub enum AromaticityModel {
     Default,
 }
 
-#[derive(Clone, Debug, Default)]
-#[allow(unused)]
-struct Point3D {
-    x: f64,
-    y: f64,
-    z: f64,
-}
-
-impl Point3D {
-    fn new(x: f64, y: f64, z: f64) -> Self {
-        Self { x, y, z }
-    }
-
-    #[inline]
-    const fn zero() -> Self {
-        Self {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-        }
-    }
-}
-
 /// Representation of a 2D or 3D conformation of a molecule as a vector of 3D
 /// points.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Conformer {
-    positions: Vec<Point3D>,
+    positions: Vec<point3d::Point3D>,
     is_3d: bool,
     id: usize,
 }
@@ -215,9 +209,10 @@ impl Conformer {
     }
 
     /// panics if `atom_id` is greater than usize::MAX lmao
-    fn set_atom_pos(&mut self, atom_id: usize, new: Point3D) {
+    fn set_atom_pos(&mut self, atom_id: usize, new: point3d::Point3D) {
         if atom_id >= self.positions.len() {
-            self.positions.resize_with(atom_id + 1, Point3D::default);
+            self.positions
+                .resize_with(atom_id + 1, point3d::Point3D::default);
         }
         self.positions[atom_id] = new;
     }
@@ -233,6 +228,10 @@ impl Conformer {
             }
         }
         false
+    }
+
+    fn get_atom_pos(&self, get_index: usize) -> &point3d::Point3D {
+        &self.positions[get_index]
     }
 }
 
@@ -311,7 +310,8 @@ impl RWMol {
                 parse_mol_block_atoms(natoms, &mut lines, &mut mol, &mut conf);
             }
             mol.add_conformer2(conf, true);
-            chirality_possible = parse_mol_block_bonds(nbonds, &mut lines, mol);
+            chirality_possible =
+                parse_mol_block_bonds(nbonds, &mut lines, &mut mol);
             // todo!("ParseMolBlockProperties");
             let mut line = lines.next().unwrap();
             if line.len() == 0 {
@@ -476,7 +476,7 @@ impl RWMol {
             todo!("unhandled ctab version: {}", ctab_version);
         }
         println!("{}", s);
-        todo!("finishMolProcessing");
+        // finishMolProcessing
         mol.clear_all_atom_bookmarks();
         mol.clear_all_bond_bookmarks();
         for aid in 0..mol.atoms().len() {
@@ -491,10 +491,10 @@ impl RWMol {
         // wedged bond from the molecule. This wipes out the only sign that
         // chirality ever existed and makes us sad... so first perceive
         // chirality, then remove the Hs and sanitize.
-        let conf = mol.conformers.first().unwrap();
+        let conf = mol.conformers[0].clone();
         if chirality_possible || conf.is_3d {
             if !conf.is_3d {
-                mol.detect_atom_stereochemistry(conf);
+                mol.detect_atom_stereochemistry(&conf);
             } else {
                 mol.update_property_cache(false);
                 mol.assign_chiral_types_from_3d(conf.id, true);
@@ -523,7 +523,7 @@ impl RWMol {
         atom.set_index(which.0);
         self.d_graph[which] = atom;
         for cfi in self.conformers_mut() {
-            cfi.set_atom_pos(which.0, Point3D::new(0.0, 0.0, 0.0));
+            cfi.set_atom_pos(which.0, point3d::Point3D::new(0.0, 0.0, 0.0));
         }
         which.0
     }
@@ -662,8 +662,8 @@ impl RWMol {
             for cptr in &self.conformers {
                 max_id = max_id.max(cptr.id);
             }
-            max_id += 1;
             conf.id = max_id;
+            max_id += 1;
         }
         let ret = conf.id;
         self.conformers.push(conf);
@@ -1283,16 +1283,125 @@ impl RWMol {
     }
 
     fn process_mol_props(&mut self) {
-        todo!()
+        // skipping this, I don't think it's relevant for what I'm doing
     }
 
     fn detect_atom_stereochemistry(&self, conf: &Conformer) {
         todo!()
     }
 
-    fn assign_chiral_types_from_3d(&self, id: usize, arg: bool) {
+    fn assign_chiral_types_from_3d(
+        &mut self,
+        id: usize,
+        replace_existing_tags: bool,
+    ) {
+        const ZERO_VOLUME_TOL: f64 = 0.1;
+        if self.conformers.is_empty() {
+            return;
+        }
+        let conf = self.conformers[id].clone();
+        if !conf.is_3d {
+            return;
+        }
+        let allow_nontetrahedral_stereo = get_allow_nontetrahedral_chirality();
+        for atom in self.atoms_mut() {
+            // if we aren't replacing existing tags and the atom is already
+            // tagged, punt
+            if !replace_existing_tags && !atom.chiral_tag.is_unspecified() {
+                continue;
+            }
+            atom.set_chiral_tag(Chi::Unspecified);
+            let nz_degree = get_atom_nonzero_degree(atom);
+            let tnz_degree = nz_degree + atom.get_total_num_hs();
+            if nz_degree < 3 || tnz_degree > 6 {
+                // not enough explicit neighbors or too many total neighbors
+                continue;
+            }
+            if allow_nontetrahedral_stereo
+                && self.assign_nontedrahedral_chiral_type_from_3d(&conf, atom)
+            {
+                continue;
+            }
+            // we're only doing tetrahedral cases here
+            if tnz_degree > 4 {
+                continue;
+            }
+            let anum = atom.atomic_number;
+            if anum != 16 && anum != 34 && tnz_degree != 4 {
+                // S and Se are special, just using the InChI list for now, not
+                // enough total neighbors
+                continue;
+            }
+            let p0 = conf.get_atom_pos(atom.get_index());
+            let mut nbrs = [Point3D::zero(), Point3D::zero(), Point3D::zero()];
+            let mut nbr_idx = 0;
+            let mut has_wiggly_bond = false;
+            for bond in self.get_atom_bonds(atom.get_index()) {
+                has_wiggly_bond = bond.is_wiggly_bond(atom);
+                if has_wiggly_bond {
+                    break;
+                }
+                if !bond_affects_atom_chirality(bond, atom) {
+                    continue;
+                }
+                nbrs[nbr_idx] = conf
+                    .get_atom_pos(bond.get_other_atom_idx(atom.get_index()))
+                    .clone();
+                nbr_idx += 1;
+                if nbr_idx == 3 {
+                    break;
+                }
+            }
+            if has_wiggly_bond {
+                continue;
+            }
+
+            let [n1, n2, n3] = nbrs;
+            let v1 = n1 - p0;
+            let v2 = n2 - p0;
+            let v3 = n3 - p0;
+
+            let chiral_vol = v1.dot(&v2.cross(&v3));
+            if chiral_vol < -ZERO_VOLUME_TOL {
+                atom.set_chiral_tag(Chi::TetrahedralCW);
+            } else if chiral_vol > ZERO_VOLUME_TOL {
+                atom.set_chiral_tag(Chi::TetrahedralCCW);
+            } else {
+                atom.set_chiral_tag(Chi::Unspecified);
+            }
+        }
+        todo!();
+    }
+
+    fn clear_single_bond_dir_flags(&self) {
         todo!()
     }
+
+    fn detect_bond_stereochemistry(&self) {
+        todo!()
+    }
+
+    fn assign_nontedrahedral_chiral_type_from_3d(
+        &self,
+        conf: &Conformer,
+        atom: &mut Atom,
+    ) -> bool {
+        todo!()
+    }
+}
+
+fn bond_affects_atom_chirality(bond: &Bond, atom: &mut Atom) -> bool {
+    todo!()
+}
+
+fn get_atom_nonzero_degree(atom: &mut Atom) -> usize {
+    todo!()
+}
+
+// TODO take from env var (RDK_ENABLE_NONTETRAHEDRAL_STEREO) before falling back
+// on default
+fn get_allow_nontetrahedral_chirality() -> bool {
+    true
 }
 
 impl Index<usize> for RWMol {

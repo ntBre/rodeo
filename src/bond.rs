@@ -192,4 +192,12 @@ impl Bond {
     pub fn set_negation(&mut self, negation: bool) {
         self.negation = negation;
     }
+
+    pub(crate) fn is_wiggly_bond(&self, atom: &mut crate::Atom) -> bool {
+        todo!()
+    }
+
+    pub(crate) fn get_other_atom_idx(&self, get_index: usize) -> usize {
+        todo!()
+    }
 }

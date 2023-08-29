@@ -2,8 +2,9 @@
 
 use crate::{
     bond::{Bond, BondDir, BondStereo, BondType},
+    point3d::{self, Point3D},
     ptable::SYMBOL,
-    Atom, Conformer, Point3D, RWMol, COMPLEX_QUERIES,
+    Atom, Conformer, RWMol, COMPLEX_QUERIES,
 };
 
 pub(crate) fn parse_mol_block_atoms(
@@ -201,7 +202,7 @@ fn parse_mol_file_atom_line(line: &str) -> (Atom, Point3D) {
 pub(crate) fn parse_mol_block_bonds(
     nbonds: usize,
     lines: &mut std::str::Lines<'_>,
-    mut mol: RWMol,
+    mol: &mut RWMol,
 ) -> bool {
     let mut chirality_possible = false;
     for i in 1..=nbonds {
