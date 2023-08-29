@@ -1,5 +1,16 @@
+#[derive(Debug, Default, PartialEq)]
+pub enum BondDir {
+    EitherDouble,
+    Wedge,
+    Dash,
+    None,
+    #[default]
+    Unknown,
+}
+
 #[derive(Debug, PartialEq)]
 pub enum BondStereo {
+    Any,
     E,
     Z,
     None,
@@ -44,6 +55,14 @@ impl BondType {
     pub fn is_triple(&self) -> bool {
         matches!(self, Self::Triple)
     }
+
+    /// Returns `true` if the bond type is [`Aromatic`].
+    ///
+    /// [`Aromatic`]: BondType::Aromatic
+    #[must_use]
+    pub fn is_aromatic(&self) -> bool {
+        matches!(self, Self::Aromatic)
+    }
 }
 
 impl From<BondType> for f64 {
@@ -68,9 +87,28 @@ impl From<BondType> for f64 {
     }
 }
 
+impl From<usize> for BondType {
+    fn from(value: usize) -> Self {
+        match value {
+            1 => Self::Single,
+            2 => Self::Double,
+            3 => Self::Triple,
+            4 => Self::Aromatic,
+            0 => Self::Unspecified,
+            _ => unimplemented!("MolFileParser.cpp:1733"),
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct Bond {
     pub(crate) bond_type: BondType,
+
+    pub(crate) bond_dir: BondDir,
+
+    pub(crate) react_status: usize,
+
+    negation: bool,
 
     /// index in the owning molecule's bonds vector
     index: usize,
@@ -82,6 +120,9 @@ pub struct Bond {
     pub(crate) end_atom_index: usize,
 
     is_aromatic: bool,
+
+    // pretty sure this is a bool, but who knows
+    pub(crate) stereo_care: usize,
 }
 
 impl Bond {
@@ -142,5 +183,13 @@ impl Bond {
 
     const fn has_query(&self) -> bool {
         false
+    }
+
+    pub fn set_bond_dir(&mut self, bond_dir: BondDir) {
+        self.bond_dir = bond_dir;
+    }
+
+    pub fn set_negation(&mut self, negation: bool) {
+        self.negation = negation;
     }
 }

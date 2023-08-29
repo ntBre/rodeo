@@ -2,6 +2,7 @@
 #![feature(lazy_cell)]
 
 use std::{
+    any::Any,
     collections::HashMap,
     fs::read_to_string,
     ops::{Index, IndexMut},
@@ -13,8 +14,9 @@ use graph::Graph;
 use ptable::{DEFAULT_VALENCE, IS_EARLY_ATOM, VALENCE_LIST};
 
 use crate::{
+    bond::{BondDir, BondStereo},
     ptable::{OUTER_ELECS, SYMBOL},
-    sdf::parse_mol_block_atoms,
+    sdf::{parse_mol_block_atoms, parse_mol_block_bonds},
 };
 
 pub mod bond;
@@ -252,6 +254,7 @@ pub struct RWMol {
     is_3d: bool,
 
     atom_bookmarks: HashMap<usize, Vec<usize>>,
+    bond_bookmarks: HashMap<usize, Vec<usize>>,
 }
 
 impl RWMol {
@@ -303,10 +306,10 @@ impl RWMol {
             if natoms == 0 {
                 conf.set_3d(false);
             } else {
-                parse_mol_block_atoms(natoms, lines, &mut mol, &mut conf);
+                parse_mol_block_atoms(natoms, &mut lines, &mut mol, &mut conf);
             }
             mol.add_conformer2(conf, true);
-            todo!("ParseMolBlockBonds");
+            parse_mol_block_bonds(nbonds, lines, mol);
             todo!("ParseMolBlockProperties");
         } else {
             todo!("unhandled ctab version: {}", ctab_version);
@@ -340,6 +343,15 @@ impl RWMol {
         b.set_begin_atom_index(atom1);
         b.set_end_atom_index(atom2);
         self.d_graph[which] = b;
+    }
+
+    /// add a bond to self and return its index
+    fn add_bond2(&mut self, mut bond: Bond) -> usize {
+        let which = self.d_graph.add_edge();
+        self.num_bonds += 1;
+        bond.set_index(self.num_bonds - 1);
+        self.d_graph[which] = bond;
+        self.num_bonds
     }
 
     pub fn set_aromaticity(&self, _model: AromaticityModel) {
@@ -1062,6 +1074,10 @@ impl RWMol {
 
     fn set_atom_bookmark(&mut self, aid: usize, i: usize) {
         self.atom_bookmarks.entry(i).or_insert(Vec::new()).push(aid);
+    }
+
+    fn set_bond_bookmark(&mut self, aid: usize, i: usize) {
+        self.bond_bookmarks.entry(i).or_insert(Vec::new()).push(aid);
     }
 }
 
