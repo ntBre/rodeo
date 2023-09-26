@@ -169,7 +169,7 @@ impl Atom {
 
 bitflags::bitflags! {
     #[repr(transparent)]
-    pub struct SanitizeOptions: u16 {
+    pub struct SanitizeOptions: u32 {
         const None = 0x0;
         const Cleanup = 0x1;
         const Properties = 0x2;
@@ -182,13 +182,20 @@ bitflags::bitflags! {
         const CleanupChirality = 0x100;
         const AdjustHs = 0x200;
         const CleanupOrganometallics = 0x400;
-        const All = 0b11111111111; // TODO not sure about this
+        const All = 0xFFFFFFF;
     }
 }
 
+impl SanitizeOptions {
+    pub fn as_u32(&self) -> u32 {
+        self.bits() as u32
+    }
+}
+
+#[repr(u8)]
 pub enum AromaticityModel {
-    MDL,
-    Default,
+    Default = 0x0,
+    MDL = 0x4,
 }
 
 /// Representation of a 2D or 3D conformation of a molecule as a vector of 3D
